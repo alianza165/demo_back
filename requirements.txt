@@ -1,0 +1,13 @@
+asgiref==3.8.1
+deepdiff==8.4.2
+Django==5.2
+django-cors-headers==4.7.0
+djangorestframework==3.16.0
+orderly-set==5.4.0
+pillow==11.1.0
+psycopg2-binary==2.9.10
+sqlparse==0.5.3
+typing_extensions==4.13.0
+openai
+pgvector
+psycopg2-binary

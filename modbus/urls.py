@@ -1,0 +1,35 @@
+# modbus/urls.py
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
+
+# Create a router and register our viewsets with it
+router = DefaultRouter()
+router.register(r'devices', views.ModusDeviceViewSet, basename='device')
+router.register(r'device-models', views.DeviceModelViewSet, basename='devicemodel')
+router.register(r'config-logs', views.ConfigurationLogViewSet, basename='config-log')
+
+
+urlpatterns = [
+    # API routes
+    path('modbus/', include(router.urls)),
+    
+    # Additional custom endpoints
+    path('modbus/devices/<int:pk>/apply_configuration/', 
+         views.ModusDeviceViewSet.as_view({'post': 'apply_configuration'}), 
+         name='device-apply-configuration'),
+    
+    path('modbus/devices/<int:pk>/config_logs/', 
+         views.ModusDeviceViewSet.as_view({'get': 'config_logs'}), 
+         name='device-config-logs'),
+    
+    path('modbus/devices/apply_all_configurations/', 
+         views.ModusDeviceViewSet.as_view({'post': 'apply_all_configurations'}), 
+         name='apply-all-configurations'),
+    
+    # Health check endpoints
+    path('health/', views.health_check, name='health-check'),
+    path('health/influxdb/', views.influxdb_health_check, name='influxdb-health-check'),
+    path('health/modbus/', views.modbus_health_check, name='modbus-health-check'),
+    path('health/config/', views.config_status, name='config-status'),
+]

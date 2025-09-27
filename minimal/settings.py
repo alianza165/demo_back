@@ -19,7 +19,6 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -36,7 +35,7 @@ DB_PORT = os.getenv('DB_PORT')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["192.168.1.9", "192.168.1.19", "192.168.1.20"]
 
 
 # Application definition
@@ -48,7 +47,26 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    # Third-party apps
+    'rest_framework',
+    'corsheaders',
+    'drf_yasg',
+    'health_check',
+
+    # Your apps
+    'modbus',
 ]
+
+# REST Framework configuration
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+    'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -65,7 +83,7 @@ ROOT_URLCONF = 'minimal.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -113,6 +131,21 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# CORS settings (adjust for your frontend)
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # Next.js dev server
+    "http://127.0.0.1:3000",
+    "http://192.168.1.9:3000",
+]
+
+# Or allow all origins in development
+CORS_ALLOW_ALL_ORIGINS = True  # Only for development!
+
+# Health check configuration
+HEALTH_CHECK = {
+    'DISK_USAGE_MAX': 90,  # percent
+    'MEMORY_MIN': 100,     # in MB
+}
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -129,7 +162,14 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+# During production, collected static files go here
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# During development, additional locations for static files
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

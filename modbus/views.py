@@ -10,15 +10,40 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from django.http import JsonResponse
-from .models import DeviceModel, ModbusDevice, ModbusRegister, ConfigurationLog
+from .models import DeviceModel, ModbusDevice, ModbusRegister, ConfigurationLog, RegisterTemplate
 from .serializers import (
     DeviceModelSerializer, ModbusDeviceSerializer, ModbusDeviceCreateSerializer,
-    ConfigurationLogSerializer
+    ConfigurationLogSerializer, RegisterTemplateSerializer
 )
 from .grafana_manager import GrafanaConfigurationManager
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+class RegisterTemplateViewSet(viewsets.ReadOnlyModelViewSet):
+    """API for predefined register templates"""
+    queryset = RegisterTemplate.objects.filter(is_active=True)
+    serializer_class = RegisterTemplateSerializer  # You'll need to create this
+    permission_classes = [AllowAny]
+
+    @action(detail=False, methods=['get'])
+    def by_category(self, request):
+        """Get templates grouped by category"""
+        templates = self.get_queryset()
+        grouped = {}
+        for template in templates:
+            if template.category not in grouped:
+                grouped[template.category] = []
+            grouped[template.category].append({
+                'id': template.id,
+                'name': template.name,
+                'address': template.address,
+                'data_type': template.data_type,
+                'scale_factor': template.scale_factor,
+                'unit': template.unit,
+                'description': template.description
+            })
+        return Response(grouped)
 
 class DeviceModelViewSet(viewsets.ModelViewSet):
     queryset = DeviceModel.objects.all()

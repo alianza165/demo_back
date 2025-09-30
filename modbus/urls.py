@@ -8,6 +8,7 @@ router = DefaultRouter()
 router.register(r'devices', views.ModusDeviceViewSet, basename='device')
 router.register(r'device-models', views.DeviceModelViewSet, basename='devicemodel')
 router.register(r'config-logs', views.ConfigurationLogViewSet, basename='config-log')
+router.register(r'register-templates', views.RegisterTemplateViewSet, basename='register-template')
 
 
 urlpatterns = [
@@ -26,6 +27,10 @@ urlpatterns = [
     path('modbus/devices/apply_all_configurations/', 
          views.ModusDeviceViewSet.as_view({'post': 'apply_all_configurations'}), 
          name='apply-all-configurations'),
+
+    path('modbus/register-templates/by_category/', 
+         views.RegisterTemplateViewSet.as_view({'get': 'by_category'}), 
+         name='register-templates-by-category'),
     
     # Health check endpoints
     path('health/', views.health_check, name='health-check'),

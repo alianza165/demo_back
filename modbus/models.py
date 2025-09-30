@@ -54,6 +54,47 @@ class ModbusDevice(models.Model):
     def __str__(self):
         return f"{self.name} ({self.device_model.name if self.device_model else 'Custom'})"
 
+
+class RegisterTemplate(models.Model):
+    """Predefined register templates for common energy metrics"""
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    address = models.IntegerField()
+    data_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('uint16', 'Unsigned 16-bit'),
+            ('int16', 'Signed 16-bit'), 
+            ('uint32', 'Unsigned 32-bit'),
+            ('int32', 'Signed 32-bit'),
+            ('float32', 'Float 32-bit'),
+        ],
+        default='uint16'
+    )
+    scale_factor = models.FloatField(default=1.0)
+    unit = models.CharField(max_length=20, blank=True)
+    category = models.CharField(
+        max_length=50,
+        choices=[
+            ('voltage', 'Voltage'),
+            ('current', 'Current'),
+            ('power', 'Power'),
+            ('energy', 'Energy'),
+            ('frequency', 'Frequency'),
+            ('power_factor', 'Power Factor'),
+            ('thd', 'THD'),
+        ]
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['category', 'address']
+
+    def __str__(self):
+        return f"{self.name} (0x{self.address:04X})"
+
+
 class ModbusRegister(models.Model):
     DATA_TYPE_CHOICES = [
         ('uint16', 'Unsigned 16-bit'),

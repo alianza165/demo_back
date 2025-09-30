@@ -1,6 +1,31 @@
 # serializers.py
 from rest_framework import serializers
-from .models import DeviceModel, ModbusDevice, ModbusRegister, EnergyMeasurement, DailyAggregate, ConfigurationLog
+from .models import DeviceModel, ModbusDevice, ModbusRegister, EnergyMeasurement, DailyAggregate, ConfigurationLog, RegisterTemplate
+
+class RegisterTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for RegisterTemplate model"""
+    
+    # Add human-readable fields if needed
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    data_type_display = serializers.CharField(source='get_data_type_display', read_only=True)
+    
+    class Meta:
+        model = RegisterTemplate
+        fields = [
+            'id',
+            'name',
+            'description', 
+            'address',
+            'data_type',
+            'data_type_display',
+            'scale_factor',
+            'unit',
+            'category',
+            'category_display',
+            'is_active',
+            'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
 
 class DeviceModelSerializer(serializers.ModelSerializer):
     class Meta:

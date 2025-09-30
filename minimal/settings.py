@@ -56,6 +56,7 @@ INSTALLED_APPS = [
 
     # Your apps
     'modbus',
+    'analytics',
 ]
 
 # Add Grafana configuration
@@ -63,6 +64,19 @@ GRAFANA_CONFIG = {
     'URL': os.getenv('GRAFANA_URL', 'http://localhost:3000'),
     'API_KEY': os.getenv('GRAFANA_API_KEY', 'your-api-key-here'),
     'DASHBOARD_PREFIX': 'modbus-',
+}
+
+# Celery configuration
+CELERY_BROKER_URL = 'redis://localhost:6379'
+CELERY_BEAT_SCHEDULE = {
+    'aggregate-hourly-data': {
+        'task': 'analytics.tasks.aggregate_hourly_data',
+        'schedule': 3600.0,  # Every hour
+    },
+    'calculate-daily-shifts': {
+        'task': 'analytics.tasks.calculate_daily_shifts', 
+        'schedule': 86400.0,  # Every day
+    },
 }
 
 # REST Framework configuration

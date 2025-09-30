@@ -15,6 +15,8 @@ from .serializers import (
     DeviceModelSerializer, ModbusDeviceSerializer, ModbusDeviceCreateSerializer,
     ConfigurationLogSerializer
 )
+from .grafana_manager import GrafanaConfigurationManager
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -34,39 +36,47 @@ class ModusDeviceViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def apply_configuration(self, request, pk=None):
-        """Apply configuration for a specific device (includes all active devices)"""
         device = self.get_object()
-        
-        config_log = ConfigurationLog.objects.create(
-            device=device,
-            status='pending'
-        )
+        config_log = ConfigurationLog.objects.create(device=device, status='pending')
         
         try:
-            # Get ALL active devices to include in the config
+            # Get ALL active devices (your existing code)
             active_devices = ModbusDevice.objects.filter(is_active=True)
-            
-            logger.info(f"Applying configuration for {active_devices.count()} active devices")
-            # Generate configuration file with ALL active devices
             config_data = self.generate_multi_device_config(active_devices)
-            
-            # Write configuration to file
             success = self.write_configuration_file(config_data)
             
             if success:
-                config_log.status = 'applied'
-                config_log.log_message = f"Configuration applied for {active_devices.count()} active devices"
-                config_log.save()
+                # NEW: Update Grafana dashboards
+                grafana_manager = GrafanaConfigurationManager()
+                grafana_success, grafana_result = grafana_manager.update_device_dashboards(active_devices)
                 
-                device_names_list = [device.name for device in active_devices]  # Changed to device_names_list
-                logger.info(f"Configuration applied for devices: {', '.join(device_names_list)}")
+                # Update device records with Grafana URLs
+                if grafana_success:
+                    for device in active_devices:
+                        if device.id in grafana_result and grafana_result[device.id]:
+                            device.grafana_dashboard_url = grafana_result[device.id]
+                            device.last_grafana_sync = timezone.now()
+                            device.save()
+                
+                config_log.status = 'applied'
+                message = f"Configuration applied for {active_devices.count()} active devices"
+                
+                if grafana_success:
+                    message += " and Grafana dashboards updated"
+                else:
+                    message += f" (Grafana update failed: {grafana_result})"
+                
+                config_log.log_message = message
+                config_log.save()
                 
                 return Response({
                     'status': 'success', 
-                    'message': f'Configuration applied for {active_devices.count()} active devices. The modbus service will automatically reload.',
+                    'message': message,
                     'log_id': config_log.id,
                     'devices_applied': active_devices.count(),
-                    'device_names': device_names_list
+                    'device_names': [device.name for device in active_devices],
+                    'grafana_updated': grafana_success,
+                    'grafana_message': grafana_result if not grafana_success else "Dashboards updated successfully"
                 })
             else:
                 config_log.status = 'failed'
@@ -130,6 +140,23 @@ class ModusDeviceViewSet(viewsets.ModelViewSet):
                 'message': f'Error applying configurations: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+    @action(detail=True, methods=['get'])
+    def grafana_dashboard(self, request, pk=None):
+        """Get Grafana dashboard URL for a device"""
+        device = self.get_object()
+        
+        if device.grafana_dashboard_url:
+            return Response({
+                'dashboard_url': device.grafana_dashboard_url,
+                'device_name': device.name,
+                'last_sync': device.last_grafana_sync
+            })
+        else:
+            return Response({
+                'error': 'No Grafana dashboard configured for this device',
+                'device_name': device.name
+            }, status=status.HTTP_404_NOT_FOUND)
+
     @action(detail=True, methods=['get'])
     def config_logs(self, request, pk=None):
         """Get configuration logs for a specific device"""

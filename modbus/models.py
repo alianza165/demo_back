@@ -44,6 +44,10 @@ class ModbusDevice(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    grafana_dashboard_uid = models.CharField(max_length=100, blank=True)
+    grafana_dashboard_url = models.URLField(blank=True)
+    last_grafana_sync = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['name']
     
@@ -58,7 +62,17 @@ class ModbusRegister(models.Model):
         ('int32', 'Signed 32-bit'),
         ('float32', 'Float 32-bit'),
     ]
-    
+    VISUALIZATION_TYPES = [
+        ('timeseries', 'Time Series'),
+        ('gauge', 'Gauge'),
+        ('stat', 'Stat'),
+    ]
+    visualization_type = models.CharField(
+        max_length=20, 
+        choices=VISUALIZATION_TYPES,
+        default='timeseries'
+    )
+    grafana_metric_name = models.CharField(max_length=100, blank=True)
     # Link to both device model (for templates) and specific device (for instances)
     device_model = models.ForeignKey(DeviceModel, on_delete=models.CASCADE, 
                                    null=True, blank=True, related_name='register_templates')
@@ -87,10 +101,15 @@ class ModbusRegister(models.Model):
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
     
     is_active = models.BooleanField(default=True)
+    influxdb_field_name = models.CharField(max_length=100, blank=True)
     
     class Meta:
         ordering = ['order', 'address']
     
+    def get_influxdb_field(self):
+        """Get the actual field name in InfluxDB"""
+        return self.influxdb_field_name or self.name
+
     def __str__(self):
         return f"{self.name} (0x{self.address:04X})"
 

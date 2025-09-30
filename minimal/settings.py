@@ -58,6 +58,13 @@ INSTALLED_APPS = [
     'modbus',
 ]
 
+# Add Grafana configuration
+GRAFANA_CONFIG = {
+    'URL': os.getenv('GRAFANA_URL', 'http://localhost:3000'),
+    'API_KEY': os.getenv('GRAFANA_API_KEY', 'your-api-key-here'),
+    'DASHBOARD_PREFIX': 'modbus-',
+}
+
 # REST Framework configuration
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
@@ -69,6 +76,7 @@ REST_FRAMEWORK = {
 }
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -133,13 +141,35 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # CORS settings (adjust for your frontend)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Next.js dev server
-    "http://127.0.0.1:3000",
-    "http://192.168.1.9:3000",
+    "http://localhost:3001",  # Next.js dev server
+    "http://127.0.0.1:3001",
+    "http://192.168.1.20:3001",
 ]
 
 # Or allow all origins in development
 CORS_ALLOW_ALL_ORIGINS = True  # Only for development!
+
+# Allowed methods
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 # Health check configuration
 HEALTH_CHECK = {

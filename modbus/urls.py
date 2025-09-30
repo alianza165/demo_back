@@ -32,4 +32,10 @@ urlpatterns = [
     path('health/influxdb/', views.influxdb_health_check, name='influxdb-health-check'),
     path('health/modbus/', views.modbus_health_check, name='modbus-health-check'),
     path('health/config/', views.config_status, name='config-status'),
+
+    # Add Grafana-specific endpoints
+    path('modbus/devices/<int:pk>/grafana_dashboard/', 
+         views.ModusDeviceViewSet.as_view({'get': 'grafana_dashboard'}), 
+         name='device-grafana-dashboard'),
+
 ]

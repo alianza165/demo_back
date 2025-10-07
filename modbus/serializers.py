@@ -1,31 +1,6 @@
 # serializers.py
 from rest_framework import serializers
-from .models import DeviceModel, ModbusDevice, ModbusRegister, EnergyMeasurement, DailyAggregate, ConfigurationLog, RegisterTemplate
-
-class RegisterTemplateSerializer(serializers.ModelSerializer):
-    """Serializer for RegisterTemplate model"""
-    
-    # Add human-readable fields if needed
-    category_display = serializers.CharField(source='get_category_display', read_only=True)
-    data_type_display = serializers.CharField(source='get_data_type_display', read_only=True)
-    
-    class Meta:
-        model = RegisterTemplate
-        fields = [
-            'id',
-            'name',
-            'description', 
-            'address',
-            'data_type',
-            'data_type_display',
-            'scale_factor',
-            'unit',
-            'category',
-            'category_display',
-            'is_active',
-            'created_at'
-        ]
-        read_only_fields = ['id', 'created_at']
+from .models import DeviceModel, ModbusDevice, ModbusRegister, ConfigurationLog
 
 class DeviceModelSerializer(serializers.ModelSerializer):
     class Meta:
@@ -105,20 +80,6 @@ class ModbusDeviceCreateSerializer(serializers.ModelSerializer):
                 instance.registers.filter(id__in=registers_to_delete).delete()
         
         return instance
-
-class EnergyMeasurementSerializer(serializers.ModelSerializer):
-    device_name = serializers.CharField(source='device.name', read_only=True)
-    
-    class Meta:
-        model = EnergyMeasurement
-        fields = '__all__'
-
-class DailyAggregateSerializer(serializers.ModelSerializer):
-    device_name = serializers.CharField(source='device.name', read_only=True)
-    
-    class Meta:
-        model = DailyAggregate
-        fields = '__all__'
 
 class ConfigurationLogSerializer(serializers.ModelSerializer):
     device_name = serializers.CharField(source='device.name', read_only=True)

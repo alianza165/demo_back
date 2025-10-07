@@ -6,49 +6,85 @@ import subprocess
 from pathlib import Path
 import logging
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from django.http import JsonResponse
-from .models import DeviceModel, ModbusDevice, ModbusRegister, ConfigurationLog, RegisterTemplate
+from .models import DeviceModel, ModbusDevice, ModbusRegister, ConfigurationLog
 from .serializers import (
     DeviceModelSerializer, ModbusDeviceSerializer, ModbusDeviceCreateSerializer,
-    ConfigurationLogSerializer, RegisterTemplateSerializer
+    ConfigurationLogSerializer
 )
 from .grafana_manager import GrafanaConfigurationManager
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-class RegisterTemplateViewSet(viewsets.ReadOnlyModelViewSet):
-    """API for predefined register templates"""
-    queryset = RegisterTemplate.objects.filter(is_active=True)
-    serializer_class = RegisterTemplateSerializer  # You'll need to create this
-    permission_classes = [AllowAny]
 
-    @action(detail=False, methods=['get'])
-    def by_category(self, request):
-        """Get templates grouped by category"""
-        templates = self.get_queryset()
-        grouped = {}
-        for template in templates:
-            if template.category not in grouped:
-                grouped[template.category] = []
-            grouped[template.category].append({
-                'id': template.id,
-                'name': template.name,
-                'address': template.address,
-                'data_type': template.data_type,
-                'scale_factor': template.scale_factor,
-                'unit': template.unit,
-                'description': template.description
-            })
-        return Response(grouped)
-
-class DeviceModelViewSet(viewsets.ModelViewSet):
-    queryset = DeviceModel.objects.all()
-    serializer_class = DeviceModelSerializer
+class DeviceModelViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for predefined device models"""
+    queryset = DeviceModel.objects.filter(is_active=True)
     permission_classes = [AllowAny]
+    
+    def list(self, request):
+        """Get list of all active device models"""
+        device_models = DeviceModel.objects.filter(is_active=True).order_by('manufacturer', 'name')
+        
+        data = [
+            {
+                'id': model.id,
+                'name': model.name,
+                'manufacturer': model.manufacturer,
+                'model_number': model.model_number,
+                'description': model.description,
+            }
+            for model in device_models
+        ]
+        
+        return Response(data)
+    
+    @action(detail=True, methods=['get'])
+    def registers(self, request, pk=None):
+        """Get registers for a specific device model"""
+        device_model = self.get_object()
+        registers = ModbusRegister.objects.filter(
+            device_model=device_model, 
+            is_active=True
+        ).order_by('order', 'address')
+        
+        data = [
+            {
+                'id': reg.id,
+                'address': reg.address,
+                'name': reg.name,
+                'data_type': reg.data_type,
+                'scale_factor': reg.scale_factor,
+                'unit': reg.unit,
+                'category': reg.category,
+                'visualization_type': reg.visualization_type,
+            }
+            for reg in registers
+        ]
+        
+        return Response(data)
+
+
+def device_models_list(request):
+    """Get list of all active device models"""
+    device_models = DeviceModel.objects.filter(is_active=True).order_by('manufacturer', 'name')
+    
+    data = [
+        {
+            'id': model.id,
+            'name': model.name,
+            'manufacturer': model.manufacturer,
+            'model_number': model.model_number,
+            'description': model.description,
+        }
+        for model in device_models
+    ]
+    
+    return JsonResponse(data, safe=False)
 
 class ModusDeviceViewSet(viewsets.ModelViewSet):
     queryset = ModbusDevice.objects.all().prefetch_related('registers')

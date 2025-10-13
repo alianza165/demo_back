@@ -5,7 +5,7 @@ from . import views
 
 # Create a router and register our viewsets with it
 router = DefaultRouter()
-router.register(r'devices', views.ModusDeviceViewSet, basename='device')
+router.register(r'devices', views.ModbusDeviceViewSet, basename='device')
 router.register(r'device-models', views.DeviceModelViewSet, basename='device-model')  # Now this works!
 router.register(r'config-logs', views.ConfigurationLogViewSet, basename='config-log')
 
@@ -15,11 +15,11 @@ urlpatterns = [
     
     # Additional custom endpoints (these are now included in the router automatically)
     path('modbus/devices/<int:pk>/apply_configuration/', 
-         views.ModusDeviceViewSet.as_view({'post': 'apply_configuration'}), 
+         views.ModbusDeviceViewSet.as_view({'post': 'apply_configuration'}), 
          name='device-apply-configuration'),
     
     path('modbus/devices/apply_all_configurations/', 
-         views.ModusDeviceViewSet.as_view({'post': 'apply_all_configurations'}), 
+         views.ModbusDeviceViewSet.as_view({'post': 'apply_all_configurations'}), 
          name='apply-all-configurations'),
     
     # Health check endpoints

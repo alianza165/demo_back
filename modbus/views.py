@@ -86,7 +86,7 @@ def device_models_list(request):
     
     return JsonResponse(data, safe=False)
 
-class ModusDeviceViewSet(viewsets.ModelViewSet):
+class ModbusDeviceViewSet(viewsets.ModelViewSet):
     queryset = ModbusDevice.objects.all().prefetch_related('registers')
     permission_classes = [AllowAny]
     
@@ -226,7 +226,17 @@ class ModusDeviceViewSet(viewsets.ModelViewSet):
         serializer = ConfigurationLogSerializer(logs, many=True)
         return Response(serializer.data)
     
-    def update(self, request, *args, **kwargs):
+    def update(self, request, *args, **kwargs):  # Correct signature
+        import logging
+        logger = logging.getLogger('django.request')
+        
+        logger.error("=== VIEWSET UPDATE STARTED ===")
+        logger.error(f"Request method: {request.method}")
+        logger.error(f"Request path: {request.path}")
+        logger.error(f"Request data: {request.data}")
+        logger.error(f"Args: {args}")
+        logger.error(f"Kwargs: {kwargs}")
+        
         # Get the device before update to check if is_active is changing
         device_id = kwargs.get('pk')
         old_is_active = None
@@ -234,33 +244,45 @@ class ModusDeviceViewSet(viewsets.ModelViewSet):
             try:
                 old_device = ModbusDevice.objects.get(id=device_id)
                 old_is_active = old_device.is_active
+                logger.error(f"Old device state - ID: {device_id}, is_active: {old_is_active}")
             except ModbusDevice.DoesNotExist:
+                logger.error(f"Device with ID {device_id} does not exist")
                 pass
         
-        # Perform the update
-        response = super().update(request, *args, **kwargs)
-        
-        # If the update was successful, check if we need to apply config
-        if response.status_code == status.HTTP_200_OK and device_id:
-            try:
-                device = ModbusDevice.objects.get(id=device_id)
-                new_is_active = device.is_active
-                
-                # Only auto-apply if is_active status changed
-                if old_is_active is not None and old_is_active != new_is_active:
-                    active_devices = ModbusDevice.objects.filter(is_active=True)
-                    config_data = self.generate_multi_device_config(active_devices)
-                    success = self.write_configuration_file(config_data)
+        try:
+            # Perform the update using parent class
+            response = super().update(request, *args, **kwargs)
+            logger.error(f"Update response status: {response.status_code}")
+            
+            # If the update was successful, check if we need to apply config
+            if response.status_code == status.HTTP_200_OK and device_id:
+                try:
+                    device = ModbusDevice.objects.get(id=device_id)
+                    new_is_active = device.is_active
+                    logger.error(f"New device state - is_active: {new_is_active}")
                     
-                    if success:
-                        logger.info(f"Auto-applied configuration after device {device.name} activation change: {old_is_active} -> {new_is_active}")
-                    else:
-                        logger.error(f"Failed to auto-apply configuration after device {device.name} update")
-                
-            except Exception as e:
-                logger.error(f"Error in update post-processing: {e}")
-        
-        return response
+                    # Only auto-apply if is_active status changed
+                    if old_is_active is not None and old_is_active != new_is_active:
+                        logger.error(f"Device activation changed: {old_is_active} -> {new_is_active}")
+                        active_devices = ModbusDevice.objects.filter(is_active=True)
+                        config_data = self.generate_multi_device_config(active_devices)
+                        success = self.write_configuration_file(config_data)
+                        
+                        if success:
+                            logger.info(f"Auto-applied configuration after device {device.name} activation change: {old_is_active} -> {new_is_active}")
+                        else:
+                            logger.error(f"Failed to auto-apply configuration after device {device.name} update")
+                    
+                except Exception as e:
+                    logger.error(f"Error in update post-processing: {e}")
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"UPDATE FAILED: {str(e)}")
+            import traceback
+            logger.error(f"FULL TRACEBACK: {traceback.format_exc()}")
+            raise
     
     def generate_multi_device_config(self, devices):
         """Generate configuration for multiple devices on the same RS485 bus"""

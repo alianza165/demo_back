@@ -158,10 +158,10 @@ class ModbusRegister(models.Model):
                 name='unique_address_per_model',
                 condition=models.Q(device_model__isnull=False)
             ),
-            models.UniqueConstraint(
-                fields=['device', 'address'], 
-                name='unique_address_per_device'
-            )
+            # models.UniqueConstraint(
+            #     fields=['device', 'address'], 
+            #     name='unique_address_per_device'
+            # )
         ]
     
     def get_influxdb_field(self):

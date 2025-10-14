@@ -49,6 +49,28 @@ class ModbusDeviceCreateSerializer(serializers.ModelSerializer):
         if hasattr(self, 'context') and self.context.get('request'):
             fields['registers'].context['is_device_update'] = True
         return fields
+
+    def create(self, validated_data):
+        import logging
+        logger = logging.getLogger('django.request')
+        
+        logger.error("=== CREATE METHOD CALLED ===")
+        logger.error(f"Validated data keys: {validated_data.keys()}")
+        
+        registers_data = validated_data.pop('registers', [])
+        logger.error(f"Number of registers to create: {len(registers_data)}")
+        
+        # Create the device first
+        device = ModbusDevice.objects.create(**validated_data)
+        
+        # Create all registers for this device
+        for i, register_data in enumerate(registers_data):
+            logger.error(f"Creating register {i}: {register_data}")
+            register_data.pop('device', None)
+            register_data.pop('device_model', None)
+            ModbusRegister.objects.create(device=device, **register_data)
+        
+        return device
     
     def update(self, instance, validated_data):
         registers_data = validated_data.pop('registers', None)

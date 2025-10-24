@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import socket
 
 load_dotenv()
 
@@ -35,8 +36,29 @@ DB_PORT = os.getenv('DB_PORT')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["192.168.1.9", "192.168.1.19", "192.168.1.20", "localhost"]
+def get_local_ip():
+    """Get the current local IP address"""
+    try:
+        # Connect to a remote address to determine local IP
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except:
+        return "127.0.0.1"
 
+# Dynamic ALLOWED_HOSTS
+LOCAL_IP = get_local_ip()
+
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "databridge.local"] + [f"192.168.1.{i}" for i in range(1, 255)]
+#ALLOWED_HOSTS = [
+#    LOCAL_IP,
+#    "localhost", 
+#    "127.0.0.1",
+#    ".local",
+#    "192.168.1.*"
+#]
+
+print(f"Django running on: {LOCAL_IP}")
 
 # Application definition
 

@@ -28,6 +28,29 @@ class ModbusRegisterSerializer(serializers.ModelSerializer):
         # Otherwise, run normal validation
         return super().validate(attrs)
 
+class DeviceModelWithRegistersSerializer(serializers.ModelSerializer):
+    """Serializer for DeviceModel that includes its register templates"""
+    register_templates = ModbusRegisterSerializer(many=True, read_only=True)
+    registers_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = DeviceModel
+        fields = [
+            'id', 
+            'name', 
+            'description', 
+            'manufacturer', 
+            'model_number', 
+            'is_active',
+            'created_at',
+            'register_templates',
+            'registers_count'
+        ]
+    
+    def get_registers_count(self, obj):
+        """Get count of register templates for this device model"""
+        return obj.register_templates.count()
+
 class ModbusDeviceSerializer(serializers.ModelSerializer):
     registers = ModbusRegisterSerializer(many=True, read_only=True)
     device_model_name = serializers.CharField(source='device_model.name', read_only=True)

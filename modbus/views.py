@@ -13,13 +13,31 @@ from django.http import JsonResponse
 from .models import DeviceModel, ModbusDevice, ModbusRegister, ConfigurationLog
 from .serializers import (
     DeviceModelSerializer, ModbusDeviceSerializer, ModbusDeviceCreateSerializer,
-    ConfigurationLogSerializer
+    ConfigurationLogSerializer, DeviceModelWithRegistersSerializer
 )
 from .grafana_manager import GrafanaConfigurationManager
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+
+class DeviceModelWithRegistersViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet specifically for device models with their registers"""
+    queryset = DeviceModel.objects.all().prefetch_related('register_templates')
+    serializer_class = DeviceModelWithRegistersSerializer
+    permission_classes = [AllowAny]
+    
+    # Optional: Add filtering
+    def get_queryset(self):
+        queryset = DeviceModel.objects.all().prefetch_related('register_templates')
+        
+        # Filter by active status if provided
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            is_active = is_active.lower() == 'true'
+            queryset = queryset.filter(is_active=is_active)
+            
+        return queryset
 
 class DeviceModelViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for predefined device models"""
@@ -342,7 +360,8 @@ class ModbusDeviceViewSet(viewsets.ModelViewSet):
                 device_config['parameters'][register.address] = (
                     register.name,
                     register.scale_factor,
-                    register.unit or ''
+                    register.unit or '',
+                    register.data_type
                 )
             
             config_data['devices'][f'device_{device.id}'] = device_config

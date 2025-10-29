@@ -7,12 +7,18 @@ from . import views
 router = DefaultRouter()
 router.register(r'devices', views.ModbusDeviceViewSet, basename='device')
 router.register(r'device-models', views.DeviceModelViewSet, basename='device-model')  # Now this works!
+router.register(r'device-models-with-registers', views.DeviceModelWithRegistersViewSet, basename='device-model-with-registers')  # New endpoint
 router.register(r'config-logs', views.ConfigurationLogViewSet, basename='config-log')
 
 urlpatterns = [
     # API routes
     path('modbus/', include(router.urls)),
     
+    # Keep the existing custom endpoints for device models
+    path('modbus/device-models/<int:pk>/registers/', 
+         views.DeviceModelViewSet.as_view({'get': 'registers'}), 
+         name='device-model-registers'),
+
     # Additional custom endpoints (these are now included in the router automatically)
     path('modbus/devices/<int:pk>/apply_configuration/', 
          views.ModbusDeviceViewSet.as_view({'post': 'apply_configuration'}), 

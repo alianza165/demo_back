@@ -158,10 +158,19 @@ class ModbusRegister(models.Model):
                 name='unique_address_per_model',
                 condition=models.Q(device_model__isnull=False)
             ),
-            # models.UniqueConstraint(
-            #     fields=['device', 'address'], 
-            #     name='unique_address_per_device'
-            # )
+            models.UniqueConstraint(
+                fields=['device', 'address'], 
+                name='unique_address_per_device',
+                condition=models.Q(device__isnull=False)
+            ),
+            # Ensure register belongs to EITHER device_model OR device, not both or neither
+            models.CheckConstraint(
+                check=(
+                    (models.Q(device_model__isnull=False) & models.Q(device__isnull=True)) |
+                    (models.Q(device_model__isnull=True) & models.Q(device__isnull=False))
+                ),
+                name='register_must_have_one_parent'
+            )
         ]
     
     def get_influxdb_field(self):

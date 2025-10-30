@@ -19,7 +19,25 @@ class ModbusRegisterSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         """
         Skip unique validation during updates when we're handling duplicates in the parent serializer
+        Also ensure register belongs to EITHER device_model OR device, not both
         """
+        # Ensure register has exactly one parent (device_model OR device)
+        device_model = attrs.get('device_model')
+        device = attrs.get('device')
+        
+        # Check if both are set
+        if device_model is not None and device is not None:
+            raise serializers.ValidationError(
+                "Register cannot belong to both device_model and device. "
+                "It must belong to exactly one."
+            )
+        
+        # Check if neither is set
+        if device_model is None and device is None:
+            raise serializers.ValidationError(
+                "Register must belong to either a device_model (template) or a device (instance)."
+            )
+        
         # If this is part of a device update, skip the unique validation
         # The parent serializer will handle duplicate addresses
         if self.context.get('is_device_update', False):

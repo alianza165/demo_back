@@ -16,6 +16,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='modbusregister',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('device_model__isnull', False), ('device__isnull', True)), models.Q(('device_model__isnull', True), ('device__isnull', False)), _connector='OR'), name='register_must_have_one_parent'),
+            constraint=models.CheckConstraint(check=models.Q(models.Q(('device_model__isnull', False), ('device__isnull', True)), models.Q(('device_model__isnull', True), ('device__isnull', False)), _connector='OR'), name='register_must_have_one_parent'),
         ),
     ]

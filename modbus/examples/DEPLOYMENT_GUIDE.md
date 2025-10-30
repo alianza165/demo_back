@@ -191,11 +191,18 @@ If issues persist:
 
 ## 📞 Next Steps
 
-1. Deploy the fixed script (see steps above)
-2. Regenerate config (fixed slave IDs)
-3. Monitor logs for 10 minutes
-4. Verify Grafana dashboards show correct data
-5. Consider standardizing field names (see ISSUES_FIXED.md)
+1. **Fix migration in production** (IMPORTANT!)
+   ```bash
+   # Migration 0008 has a bug - fix it first
+   # See MIGRATION_FIX.md in project root
+   git pull
+   python manage.py migrate modbus
+   ```
+2. Deploy the fixed script (see steps above)
+3. Regenerate config (fixed slave IDs)
+4. Monitor logs for 10 minutes
+5. Verify Grafana dashboards show correct data
+6. Consider standardizing field names (see ISSUES_FIXED.md)
 
 Your data should now be accurate! 🎉
 

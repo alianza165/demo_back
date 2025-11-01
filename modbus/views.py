@@ -355,8 +355,8 @@ class ModbusDeviceViewSet(viewsets.ModelViewSet):
             if device.timeout != global_timeout:
                 device_config['timeout'] = device.timeout
             
-            # Add registers as parameters
-            for register in device.registers.filter(is_active=True).order_by('order'):
+            # Add registers as parameters (ensure they belong exclusively to the device)
+            for register in device.registers.filter(is_active=True, device_model__isnull=True).order_by('order'):
                 device_config['parameters'][register.address] = (
                     register.name,
                     register.scale_factor,

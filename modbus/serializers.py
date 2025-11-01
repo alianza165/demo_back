@@ -18,9 +18,13 @@ class ModbusRegisterSerializer(serializers.ModelSerializer):
     
     def validate(self, attrs):
         """
-        Skip unique validation during updates when we're handling duplicates in the parent serializer
-        Also ensure register belongs to EITHER device_model OR device, not both
+        Skip validations that require a concrete parent when nested under
+        a device create/update. The parent serializer handles attachment
+        and uniqueness in that flow.
         """
+        # If nested under device create/update, bypass parent checks here
+        if self.context.get('is_device_update', False):
+            return attrs
         # Ensure register has exactly one parent (device_model OR device)
         device_model = attrs.get('device_model')
         device = attrs.get('device')
@@ -38,10 +42,19 @@ class ModbusRegisterSerializer(serializers.ModelSerializer):
                 "Register must belong to either a device_model (template) or a device (instance)."
             )
         
-        # If this is part of a device update, skip the unique validation
-        # The parent serializer will handle duplicate addresses
-        if self.context.get('is_device_update', False):
-            return attrs
+        # Enforce uniqueness of address per parent when creating/updating directly
+        address = attrs.get('address')
+        if address is not None:
+            if device is not None:
+                qs = ModbusRegister.objects.filter(device=device, address=address)
+            else:
+                qs = ModbusRegister.objects.filter(device_model=device_model, address=address)
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    { 'address': 'A register with this address already exists for this parent.' }
+                )
         
         # Otherwise, run normal validation
         return super().validate(attrs)
@@ -84,12 +97,13 @@ class ModbusDeviceCreateSerializer(serializers.ModelSerializer):
         model = ModbusDevice
         fields = '__all__'
     
-    def get_fields(self):
-        fields = super().get_fields()
-        # Add context to indicate this is a device update
-        if hasattr(self, 'context') and self.context.get('request'):
-            fields['registers'].context['is_device_update'] = True
-        return fields
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Ensure nested registers serializer knows it's under a device create/update
+        if 'registers' in self.fields and hasattr(self.fields['registers'], 'child'):
+            self.fields['registers'].child.context.update({
+                'is_device_update': True
+            })
 
     def create(self, validated_data):
         import logging
@@ -104,12 +118,23 @@ class ModbusDeviceCreateSerializer(serializers.ModelSerializer):
         # Create the device first
         device = ModbusDevice.objects.create(**validated_data)
         
-        # Create all registers for this device
+        # Create all registers for this device with idempotency by address
         for i, register_data in enumerate(registers_data):
             logger.error(f"Creating register {i}: {register_data}")
             register_data.pop('device', None)
             register_data.pop('device_model', None)
-            ModbusRegister.objects.create(device=device, **register_data)
+            address = register_data.get('address')
+            defaults = {k: v for k, v in register_data.items() if k != 'address'}
+            register, created = ModbusRegister.objects.get_or_create(
+                device=device,
+                address=address,
+                defaults=defaults,
+            )
+            if not created:
+                # Update existing register to match provided data
+                for attr, value in defaults.items():
+                    setattr(register, attr, value)
+                register.save()
         
         return device
     

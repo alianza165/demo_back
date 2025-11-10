@@ -257,7 +257,8 @@ def _compute_trend_and_anomalies(daily: pd.DataFrame, window: int = 7) -> Tuple[
         recent = recent.assign(zscore=(recent["kwh"] - mean) / std)
         flagged = recent[recent["zscore"].abs() >= 2].copy()
         if not flagged.empty:
-            flagged.insert(0, "device_id", device)
+            if "device_id" not in flagged.columns:
+                flagged.insert(0, "device_id", device)
             anomalies.append(flagged)
 
     anomalies_df = pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
@@ -408,4 +409,5 @@ def render_csv(frames: Dict[str, pd.DataFrame]) -> str:
             df.to_csv(output, index=False)
             output.write("\n")
     return output.getvalue()
+
 

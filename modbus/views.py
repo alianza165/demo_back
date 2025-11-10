@@ -357,12 +357,30 @@ class ModbusDeviceViewSet(viewsets.ModelViewSet):
             
             # Add registers as parameters (ensure they belong exclusively to the device)
             for register in device.registers.filter(is_active=True, device_model__isnull=True).order_by('order'):
-                device_config['parameters'][register.address] = (
+                # Build parameter config: [name, scale, unit, data_type, register_count?, word_order?]
+                param_config = [
                     register.name,
                     register.scale_factor,
                     register.unit or '',
                     register.data_type
-                )
+                ]
+                # Get effective register count (explicit or auto-calculated)
+                register_count = register.register_count if register.register_count > 0 else register.get_register_count()
+                
+                # Add register_count and word_order if needed (for multi-word registers)
+                if register_count > 1 or register.word_order != 'high-low':
+                    # Include register_count if it's a multi-word register or word_order is custom
+                    if register_count > 1:
+                        param_config.append(register_count)
+                    elif register.word_order != 'high-low':
+                        # Need count to specify word_order, so add calculated count
+                        param_config.append(register.get_register_count())
+                    
+                    # Add word_order if not default
+                    if register.word_order != 'high-low':
+                        param_config.append(register.word_order)
+                
+                device_config['parameters'][register.address] = tuple(param_config)
             
             config_data['devices'][f'device_{device.id}'] = device_config
         

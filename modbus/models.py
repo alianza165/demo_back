@@ -121,6 +121,11 @@ class ModbusRegister(models.Model):
         help_text="Link to specific device instance"
     )
     
+    WORD_ORDER_CHOICES = [
+        ('high-low', 'High-Low'),
+        ('low-high', 'Low-High'),
+    ]
+    
     # Register configuration
     address = models.IntegerField()
     name = models.CharField(max_length=100)
@@ -128,6 +133,18 @@ class ModbusRegister(models.Model):
     scale_factor = models.FloatField(default=1.0)
     unit = models.CharField(max_length=20, blank=True)
     order = models.IntegerField(default=0)
+    
+    # Multi-word register support
+    register_count = models.IntegerField(
+        default=0,
+        help_text="Number of registers to read (0 = auto-calculate from data_type)"
+    )
+    word_order = models.CharField(
+        max_length=10,
+        choices=WORD_ORDER_CHOICES,
+        default='high-low',
+        help_text="Word order for multi-word registers (high-low or low-high)"
+    )
     
     # Categorization
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
@@ -172,6 +189,18 @@ class ModbusRegister(models.Model):
                 name='register_must_have_one_parent'
             )
         ]
+    
+    def get_register_count(self):
+        """Get the effective register count (explicit or auto-calculated)"""
+        if self.register_count > 0:
+            return self.register_count
+        
+        # Auto-calculate based on data type
+        type_map = {
+            'uint16': 1, 'int16': 1,
+            'uint32': 2, 'int32': 2, 'float32': 2
+        }
+        return type_map.get(self.data_type.lower(), 1)
     
     def get_influxdb_field(self):
         return self.influxdb_field_name or self.name

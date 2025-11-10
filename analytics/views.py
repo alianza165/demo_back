@@ -1,14 +1,26 @@
-from rest_framework import viewsets, status
+import math
+from datetime import timedelta
+
+import pandas as pd
+from django.http import HttpResponse
+from django.utils import timezone
+from django.db.models import Sum, Avg, Max
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.utils import timezone
-from datetime import timedelta
-from django.db.models import Sum, Avg, Max
+from rest_framework.views import APIView
+
 from .models import EnergySummary, ShiftEnergyData, ShiftDefinition
 from .serializers import (
     EnergySummarySerializer, 
     ShiftEnergyDataSerializer,
-    ShiftDefinitionSerializer
+    ShiftDefinitionSerializer,
+    EnergyAnalyticsQuerySerializer,
+)
+from .energy_service import (
+    EnergyAnalyticsError,
+    run_energy_analytics,
+    render_csv,
 )
 
 class EnergySummaryViewSet(viewsets.ReadOnlyModelViewSet):
@@ -115,3 +127,113 @@ class ShiftEnergyViewSet(viewsets.ReadOnlyModelViewSet):
 class ShiftDefinitionViewSet(viewsets.ModelViewSet):
     queryset = ShiftDefinition.objects.all()
     serializer_class = ShiftDefinitionSerializer
+
+
+def _df_to_records(df: pd.DataFrame, precision: int = 3) -> list[dict]:
+    if df.empty:
+        return []
+    rounded = df.copy()
+    numeric_cols = rounded.select_dtypes(include=["float", "int"]).columns
+    rounded[numeric_cols] = rounded[numeric_cols].round(precision)
+    return (
+        rounded.replace({pd.NA: None, math.nan: None})
+        .to_dict(orient="records")
+    )
+
+
+class EnergyAnalyticsSummaryView(APIView):
+    """
+    Returns daily summaries, hourly comparisons, trend data, and performance scores.
+    """
+
+    def get(self, request):
+        serializer = EnergyAnalyticsQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+
+        devices = serializer.get_devices()
+        params = serializer.validated_data
+
+        try:
+            result = run_energy_analytics(
+                start=params.get("start"),
+                end=params.get("end"),
+                days=params.get("days", 8),
+                devices=devices or None,
+                target_kwh=params.get("target_kwh"),
+            )
+        except EnergyAnalyticsError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        include_hourly = params.get("include_hourly", True)
+        include_trend = params.get("include_trend", True)
+
+        response_payload = {
+            "analysis_window": {
+                "start": result.start.isoformat(),
+                "end": result.end.isoformat(),
+            },
+            "devices": result.device_filter or devices or [],
+            "daily_summary": _df_to_records(result.daily_summary),
+            "performance_scores": result.performance_scores,
+        }
+
+        if include_hourly:
+            response_payload["hourly_comparison"] = _df_to_records(result.hourly_comparison)
+
+        if include_trend:
+            response_payload["trend"] = _df_to_records(result.trend)
+            response_payload["anomalies"] = _df_to_records(result.anomalies)
+
+        # Overall score (average of device scores)
+        if result.performance_scores:
+            overall = [
+                scores.get("overall_score")
+                for scores in result.performance_scores.values()
+                if scores.get("overall_score") is not None
+            ]
+            if overall:
+                response_payload["overall_score"] = round(sum(overall) / len(overall), 2)
+
+        return Response(response_payload)
+
+
+class EnergyAnalyticsReportView(APIView):
+    """
+    Streams a CSV report for the requested analytics window.
+    """
+
+    def get(self, request):
+        serializer = EnergyAnalyticsQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+
+        devices = serializer.get_devices()
+        params = serializer.validated_data
+        section = request.query_params.get("section", "all").lower()
+
+        try:
+            result = run_energy_analytics(
+                start=params.get("start"),
+                end=params.get("end"),
+                days=params.get("days", 8),
+                devices=devices or None,
+                target_kwh=params.get("target_kwh"),
+            )
+        except EnergyAnalyticsError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        frames = {}
+        if section in ("hourly", "all"):
+            frames["hourly"] = result.hourly
+        if section in ("daily", "all"):
+            frames["daily"] = result.daily
+        if section in ("summary", "all"):
+            frames["daily_summary"] = result.daily_summary
+
+        if not frames:
+            return Response({"detail": "Invalid section parameter."}, status=status.HTTP_400_BAD_REQUEST)
+
+        csv_content = render_csv(frames)
+        filename = f"energy_report_{result.start.date()}_{result.end.date()}.csv"
+        response = HttpResponse(csv_content, content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

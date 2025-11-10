@@ -18,4 +18,16 @@ urlpatterns = [
     path('analytics/shift-energy/efficiency_report/', 
          views.ShiftEnergyViewSet.as_view({'get': 'efficiency_report'}), 
          name='shift-efficiency-report'),
+
+    # New analytics insights endpoints
+    path(
+        'analytics/energy-insights/summary/',
+        views.EnergyAnalyticsSummaryView.as_view(),
+        name='energy-analytics-summary',
+    ),
+    path(
+        'analytics/energy-insights/report/',
+        views.EnergyAnalyticsReportView.as_view(),
+        name='energy-analytics-report',
+    ),
 ]

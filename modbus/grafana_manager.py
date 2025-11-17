@@ -86,62 +86,25 @@ class GrafanaConfigurationManager:
         panels = []
         panel_id = 1
         
-        # Map register names to actual field names in InfluxDB
         field_mapping = self.get_field_mapping(device)
         
         for i, (register_name, field_name) in enumerate(field_mapping.items()):
-            # Calculate grid position (2 panels per row)
             x_pos = (i % 2) * 12
             y_pos = (i // 2) * 8
             
-            # Get register for unit information
             register = device.registers.filter(name=register_name, is_active=True).first()
             unit = register.unit if register else "short"
             
-            # Create a panel for each register
-            panel = {
-                "id": panel_id,
-                "title": f"{register_name}",
-                "type": "timeseries",
-                "gridPos": {
-                    "h": 8,
-                    "w": 12,
-                    "x": x_pos,
-                    "y": y_pos
-                },
-                "targets": [
-                    {
-                        "query": f'''
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device.name}")
-                              |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-                              |> yield(name: "mean")
-                        ''',
-                        "rawQuery": True,
-                        "resultFormat": "time_series"
-                    }
-                ],
-                "fieldConfig": {
-                    "defaults": {
-                        "unit": unit,
-                        "color": {"mode": "palette-classic"},
-                        "custom": {
-                            "drawStyle": "line",
-                            "lineInterpolation": "linear",
-                            "barAlignment": 0,
-                            "lineWidth": 1,
-                            "fillOpacity": 10,
-                            "gradientMode": "none",
-                            "spanNulls": False,
-                            "showPoints": "auto",
-                            "pointSize": 5
-                        }
-                    }
-                }
-            }
+            panel = self.build_panel(
+                panel_id=panel_id,
+                register_name=register_name,
+                register=register,
+                field_name=field_name,
+                unit=unit,
+                device_name=device.name,
+                x_pos=x_pos,
+                y_pos=y_pos,
+            )
             panels.append(panel)
             panel_id += 1
         
@@ -157,6 +120,127 @@ class GrafanaConfigurationManager:
             },
             "overwrite": True
         }
+
+    def build_panel(self, panel_id, register_name, register, field_name, unit, device_name, x_pos, y_pos):
+        """Create Grafana panel config based on register visualization type"""
+        visualization_type = (getattr(register, 'visualization_type', None) or 'timeseries').lower()
+        panel_type = self.get_panel_type(visualization_type)
+        grid_height = 8 if panel_type != "stat" else 4
+        
+        base_panel = {
+            "id": panel_id,
+            "title": register_name,
+            "type": panel_type,
+            "gridPos": {
+                "h": grid_height,
+                "w": 12,
+                "x": x_pos,
+                "y": y_pos
+            },
+            "targets": [
+                {
+                    "query": f'''
+                        from(bucket: "databridge")
+                          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                          |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
+                          |> filter(fn: (r) => r["_field"] == "{field_name}")
+                          |> filter(fn: (r) => r["device_id"] == "{device_name}")
+                          |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+                          |> yield(name: "mean")
+                    ''',
+                    "rawQuery": True,
+                    "resultFormat": "time_series"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": self.get_field_defaults(visualization_type, unit),
+                "overrides": []
+            },
+            "options": self.get_panel_options(visualization_type)
+        }
+        
+        return base_panel
+
+    def get_panel_type(self, visualization_type):
+        mapping = {
+            "gauge": "gauge",
+            "stat": "stat",
+            "value": "stat",
+            "bar": "bargauge",
+            "bargauge": "bargauge",
+            "table": "table",
+        }
+        return mapping.get(visualization_type, "timeseries")
+
+    def get_field_defaults(self, visualization_type, unit):
+        base_defaults = {
+            "unit": unit,
+            "color": {"mode": "palette-classic"},
+        }
+        
+        if visualization_type in ["gauge", "bargauge"]:
+            base_defaults["mappings"] = []
+            base_defaults["thresholds"] = {
+                "mode": "absolute",
+                "steps": [
+                    {"color": "green", "value": None},
+                    {"color": "orange", "value": 70},
+                    {"color": "red", "value": 90},
+                ]
+            }
+        elif visualization_type in ["stat", "value"]:
+            base_defaults["custom"] = {
+                "calc": "lastNotNull",
+                "displayMode": "lcd",
+                "inspect": False,
+            }
+        elif visualization_type == "table":
+            base_defaults["custom"] = {
+                "align": "auto",
+                "displayMode": "auto",
+            }
+        else:
+            base_defaults["custom"] = {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "barAlignment": 0,
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "spanNulls": False,
+                "showPoints": "auto",
+                "pointSize": 5
+            }
+        return base_defaults
+
+    def get_panel_options(self, visualization_type):
+        if visualization_type in ["gauge", "bargauge"]:
+            return {
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": False
+                },
+                "showThresholdLabels": False,
+                "showThresholdMarkers": True
+            }
+        if visualization_type in ["stat", "value"]:
+            return {
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": False
+                },
+                "orientation": "auto",
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+            }
+        if visualization_type == "table":
+            return {
+                "showHeader": True
+            }
+        return {}
     
     def get_field_mapping(self, device):
         """Map register names to actual InfluxDB field names"""

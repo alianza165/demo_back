@@ -559,3 +559,183 @@ def config_status(request):
             'status': 'error',
             'error': str(e)
         }, status=500)
+
+def realtime_power_data(request):
+    """Get real-time active_power_total for all active devices"""
+    try:
+        from influxdb_client import InfluxDBClient
+        from datetime import datetime, timedelta
+        
+        # Get all active devices
+        active_devices = ModbusDevice.objects.filter(is_active=True)
+        
+        if not active_devices.exists():
+            return JsonResponse({
+                'devices': [],
+                'timestamp': timezone.now().isoformat()
+            })
+        
+        # Connect to InfluxDB
+        client = InfluxDBClient(
+            url='http://localhost:8086',
+            token='PQF2DMjfNtn__ooeubqDTUaiXegywYbzUBNyTjpvd7qoUrmq9PpGVyS8lybnmf-sszI7V1HEwZWdSvgkEGfzcQ==',
+            org='DATABRIDGE'
+        )
+        query_api = client.query_api()
+        
+        # Query for latest active_power_total for each device
+        device_data = []
+        for device in active_devices:
+            try:
+                # Find the active_power_total register for this device
+                power_register = device.registers.filter(
+                    name__icontains='active_power_total',
+                    is_active=True
+                ).first()
+                
+                if not power_register:
+                    # Try alternative field names
+                    power_register = device.registers.filter(
+                        name__icontains='total_active_power',
+                        is_active=True
+                    ).first()
+                
+                if power_register:
+                    # Get the field name (use influxdb_field_name if available, otherwise use name)
+                    field_name = power_register.influxdb_field_name or power_register.name
+                    
+                    # Query for the latest value (last 5 minutes, get most recent)
+                    query = f'''
+                    from(bucket: "databridge")
+                      |> range(start: -5m)
+                      |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
+                      |> filter(fn: (r) => r["_field"] == "{field_name}")
+                      |> filter(fn: (r) => r["device_id"] == "{device.name}")
+                      |> last()
+                    '''
+                    
+                    result = query_api.query(query)
+                    power_value = None
+                    last_update = None
+                    
+                    for table in result:
+                        for record in table.records:
+                            power_value = record.get_value()
+                            last_update = record.get_time()
+                            break
+                        if power_value is not None:
+                            break
+                    
+                    # Apply scale factor if needed
+                    if power_value is not None and power_register.scale_factor:
+                        power_value = power_value * power_register.scale_factor
+                    
+                    device_data.append({
+                        'id': device.id,
+                        'name': device.name,
+                        'location': device.location or '',
+                        'power_value': power_value,
+                        'unit': power_register.unit or 'kW',
+                        'last_update': last_update.isoformat() if last_update else None,
+                        'is_online': power_value is not None,
+                        'parent_device_id': device.parent_device.id if device.parent_device else None,
+                        'parent_device_name': device.parent_device.name if device.parent_device else None
+                    })
+                else:
+                    # No active_power_total register found
+                    device_data.append({
+                        'id': device.id,
+                        'name': device.name,
+                        'location': device.location or '',
+                        'power_value': None,
+                        'unit': 'kW',
+                        'last_update': None,
+                        'is_online': False,
+                        'parent_device_id': device.parent_device.id if device.parent_device else None,
+                        'parent_device_name': device.parent_device.name if device.parent_device else None
+                    })
+            except Exception as e:
+                logger.error(f"Error fetching power data for device {device.name}: {e}")
+                device_data.append({
+                    'id': device.id,
+                    'name': device.name,
+                    'location': device.location or '',
+                    'power_value': None,
+                    'unit': 'kW',
+                    'last_update': None,
+                    'is_online': False,
+                    'error': str(e),
+                    'parent_device_id': device.parent_device.id if device.parent_device else None,
+                    'parent_device_name': device.parent_device.name if device.parent_device else None
+                })
+        
+        client.close()
+        
+        return JsonResponse({
+            'devices': device_data,
+            'timestamp': timezone.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in realtime_power_data: {e}")
+        return JsonResponse({
+            'error': str(e),
+            'devices': [],
+            'timestamp': timezone.now().isoformat()
+        }, status=500)
+
+@api_view(['POST'])
+def set_device_parent(request, pk):
+    """Set parent device for a device in the single-line diagram"""
+    try:
+        device = ModbusDevice.objects.get(pk=pk)
+        parent_id = request.data.get('parent_device_id')
+        
+        if parent_id is None:
+            device.parent_device = None
+        else:
+            try:
+                parent_device = ModbusDevice.objects.get(pk=parent_id)
+                # Prevent circular references
+                if parent_device.id == device.id:
+                    return Response(
+                        {'error': 'Device cannot be its own parent'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                # Check for circular reference (parent's parent chain)
+                current = parent_device
+                depth = 0
+                while current.parent_device and depth < 10:  # Max depth check
+                    if current.parent_device.id == device.id:
+                        return Response(
+                            {'error': 'Circular reference detected'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    current = current.parent_device
+                    depth += 1
+                device.parent_device = parent_device
+            except ModbusDevice.DoesNotExist:
+                return Response(
+                    {'error': f'Parent device with id {parent_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        device.save()
+        return Response({
+            'success': True,
+            'device_id': device.id,
+            'device_name': device.name,
+            'parent_device_id': device.parent_device.id if device.parent_device else None,
+            'parent_device_name': device.parent_device.name if device.parent_device else None
+        })
+    except ModbusDevice.DoesNotExist:
+        return Response(
+            {'error': f'Device with id {pk} not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Error setting device parent: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

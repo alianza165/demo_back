@@ -85,6 +85,8 @@ class DeviceModelWithRegistersSerializer(serializers.ModelSerializer):
 class ModbusDeviceSerializer(serializers.ModelSerializer):
     registers = ModbusRegisterSerializer(many=True, read_only=True)
     device_model_name = serializers.CharField(source='device_model.name', read_only=True)
+    parent_device_name = serializers.CharField(source='parent_device.name', read_only=True)
+    parent_device_id = serializers.IntegerField(source='parent_device.id', read_only=True)
     
     class Meta:
         model = ModbusDevice

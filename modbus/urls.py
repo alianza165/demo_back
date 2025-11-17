@@ -33,4 +33,10 @@ urlpatterns = [
     path('health/influxdb/', views.influxdb_health_check, name='influxdb-health-check'),
     path('health/modbus/', views.modbus_health_check, name='modbus-health-check'),
     path('health/config/', views.config_status, name='config-status'),
+    
+    # Real-time data endpoints
+    path('modbus/realtime/power/', views.realtime_power_data, name='realtime-power-data'),
+    
+    # Device relationship endpoints
+    path('modbus/devices/<int:pk>/set_parent/', views.set_device_parent, name='set-device-parent'),
 ]

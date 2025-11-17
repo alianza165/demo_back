@@ -60,6 +60,16 @@ class ModbusDevice(models.Model):
     location = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
     
+    # Single-line diagram relationships
+    parent_device = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='child_devices',
+        help_text="Parent device in the single-line diagram hierarchy"
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

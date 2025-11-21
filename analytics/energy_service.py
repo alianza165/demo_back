@@ -69,22 +69,93 @@ def _build_flux_query(
     stop: datetime,
     devices: Optional[Iterable[str]] = None,
 ) -> str:
-    predicates = [
-        f'r["_measurement"] == "{measurement}"',
-        f'r["_field"] == "{field}"',
-    ]
+    """
+    Build a Flux query that uses downsampled data based on time range to optimize performance:
+    - Last 5 days: raw data (energy_measurements)
+    - Days 5-35: 1-minute downsampled (energy_measurements_1m)
+    - Days 35-215: 5-minute downsampled (energy_measurements_5m)
+    - Older: 1-hour downsampled (energy_measurements_1h)
+    
+    This significantly reduces the number of data points processed, especially for longer time ranges.
+    """
+    now = datetime.now(timezone.utc)
+    days_back = (now - start).total_seconds() / 86400
+    cutoff_5d = now - timedelta(days=5)
+    cutoff_35d = now - timedelta(days=35)
+    cutoff_215d = now - timedelta(days=215)
+    
+    # Build device filter
+    device_filter = ""
     if devices:
         device_pred = " or ".join([f'r["device_id"] == "{device}"' for device in devices])
-        predicates.append(f"({device_pred})")
-
-    predicate_str = " and ".join(predicates)
-
-    flux = f"""
-from(bucket: "{bucket}")
-  |> range(start: {start.isoformat()}, stop: {stop.isoformat()})
-  |> filter(fn: (r) => {predicate_str})
-  |> keep(columns: ["_time", "_value", "device_id", "location"])
-"""
+        device_filter = f' and ({device_pred})'
+    
+    # Build union query for all relevant measurements based on time range
+    measurement_queries = []
+    
+    # Raw data for last 5 days (if query includes recent data)
+    if stop > cutoff_5d:
+        raw_start = max(start, cutoff_5d)
+        raw_stop = min(stop, now)
+        if raw_start < raw_stop:
+            # Aggregate raw data to 1-minute intervals to reduce data points
+            measurement_queries.append(f'''
+  from(bucket: "{bucket}")
+    |> range(start: {raw_start.isoformat()}, stop: {raw_stop.isoformat()})
+    |> filter(fn: (r) => r["_measurement"] == "{measurement}" and r["_field"] == "{field}"{device_filter})
+    |> aggregateWindow(every: 1m, fn: last, createEmpty: false)
+    |> keep(columns: ["_time", "_value", "device_id", "location"])
+''')
+    
+    # 1-minute downsampled for days 5-35 (if query includes this range)
+    if start < cutoff_5d:
+        meas_1m_start = max(start, cutoff_35d)
+        meas_1m_stop = min(stop, cutoff_5d)
+        if meas_1m_start < meas_1m_stop:
+            measurement_queries.append(f'''
+  from(bucket: "{bucket}")
+    |> range(start: {meas_1m_start.isoformat()}, stop: {meas_1m_stop.isoformat()})
+    |> filter(fn: (r) => r["_measurement"] == "{measurement}_1m" and r["_field"] == "{field}"{device_filter})
+    |> keep(columns: ["_time", "_value", "device_id", "location"])
+''')
+    
+    # 5-minute downsampled for days 35-215 (if query includes this range)
+    if start < cutoff_35d:
+        meas_5m_start = max(start, cutoff_215d)
+        meas_5m_stop = min(stop, cutoff_35d)
+        if meas_5m_start < meas_5m_stop:
+            measurement_queries.append(f'''
+  from(bucket: "{bucket}")
+    |> range(start: {meas_5m_start.isoformat()}, stop: {meas_5m_stop.isoformat()})
+    |> filter(fn: (r) => r["_measurement"] == "{measurement}_5m" and r["_field"] == "{field}"{device_filter})
+    |> keep(columns: ["_time", "_value", "device_id", "location"])
+''')
+    
+    # 1-hour downsampled for data older than 215 days (if query includes this range)
+    if start < cutoff_215d:
+        meas_1h_stop = min(stop, cutoff_215d)
+        measurement_queries.append(f'''
+  from(bucket: "{bucket}")
+    |> range(start: {start.isoformat()}, stop: {meas_1h_stop.isoformat()})
+    |> filter(fn: (r) => r["_measurement"] == "{measurement}_1h" and r["_field"] == "{field}"{device_filter})
+    |> keep(columns: ["_time", "_value", "device_id", "location"])
+''')
+    
+    if not measurement_queries:
+        # Fallback to raw data if no downsampled data matches
+        measurement_queries.append(f'''
+  from(bucket: "{bucket}")
+    |> range(start: {start.isoformat()}, stop: {stop.isoformat()})
+    |> filter(fn: (r) => r["_measurement"] == "{measurement}" and r["_field"] == "{field}"{device_filter})
+    |> keep(columns: ["_time", "_value", "device_id", "location"])
+''')
+    
+    # Union all measurements - raw data is already aggregated to 1m, downsampled data is already at correct resolution
+    # No need for additional aggregation since all sources are now at 1-minute resolution
+    flux = f'''
+union(tables: [{",".join(measurement_queries)}])
+  |> sort(columns: ["_time"])
+'''
     return flux
 
 

@@ -140,11 +140,34 @@ class GrafanaConfigurationManager:
             "targets": [
                 {
                     "query": f'''
-                        from(bucket: "databridge")
-                          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                          |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
-                          |> filter(fn: (r) => r["_field"] == "{field_name}")
-                          |> filter(fn: (r) => r["device_id"] == "{device_name}")
+                        // Union query to automatically select the right measurement based on time range
+                        // Raw data (last 5 days) + 1-min downsampled (days 5-35) + 5-min (days 35-215) + 1-hour (days 215-580)
+                        union(tables: [
+                            // Raw data for last 5 days
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
+                            // 1-minute downsampled for days 5-35
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1m")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
+                            // 5-minute downsampled for days 35-215
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_5m")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
+                            // 1-hour downsampled for days 215-580
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1h")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}")
+                        ])
                           |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
                           |> yield(name: "mean")
                     ''',

@@ -284,6 +284,18 @@ class SimpleModbusMonitor:
         logger.error(f"Failed to connect after {max_retries} attempts")
         return False
     
+    def convert_modbus_address(self, address):
+        """
+        Convert Modbus notation address to protocol address.
+        Modbus notation: 40001-49999 are holding registers
+        Protocol: 0-based addressing (40001 -> 0, 40003 -> 2, etc.)
+        """
+        # If address is in Modbus notation range (40001-49999), convert to 0-based
+        if 40001 <= address <= 49999:
+            return address - 40001
+        # Otherwise, assume it's already in protocol format
+        return address
+    
     def read_device_parameters(self, device):
         """Read all parameters for a specific device with proper data type handling"""
         data_points = {}
@@ -296,11 +308,14 @@ class SimpleModbusMonitor:
             scale_factor = param_info['scale']
             
             try:
+                # Convert Modbus notation address to protocol address
+                protocol_address = self.convert_modbus_address(address)
+                
                 # Get number of registers to read based on data type
                 register_count = self.register_reader.get_register_count(data_type)
                 
                 response = self.modbus_client.read_holding_registers(
-                    address=address, 
+                    address=protocol_address, 
                     count=register_count,
                     slave=device.slave_id
                 )

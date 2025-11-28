@@ -30,6 +30,11 @@ class ModbusDevice(models.Model):
         ('facility', 'Facility'),    # Entire facility
     ]
     
+    DEVICE_TYPE_CHOICES = [
+        ('electricity', 'Electricity Analyzer'),
+        ('flowmeter', 'Flowmeter'),
+    ]
+    
     # Basic device info
     name = models.CharField(max_length=100)
     device_model = models.ForeignKey(
@@ -38,6 +43,12 @@ class ModbusDevice(models.Model):
         null=True, 
         blank=True, 
         related_name='devices'
+    )
+    device_type = models.CharField(
+        max_length=20,
+        choices=DEVICE_TYPE_CHOICES,
+        default='electricity',
+        help_text="Type of device: electricity analyzer or flowmeter"
     )
     application_type = models.CharField(
         max_length=20,
@@ -109,6 +120,10 @@ class ModbusRegister(models.Model):
         ('harmonics', 'Harmonics'),
         ('frequency', 'Frequency'),
         ('temperature', 'Temperature'),
+        ('flow', 'Flow'),
+        ('pressure', 'Pressure'),
+        ('heat', 'Heat'),
+        ('density', 'Density'),
         ('status', 'Status'),
         ('other', 'Other'),
     ]

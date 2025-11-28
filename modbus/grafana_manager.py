@@ -95,6 +95,20 @@ class GrafanaConfigurationManager:
             register = device.registers.filter(name=register_name, is_active=True).first()
             unit = register.unit if register else "short"
             
+            # Convert W to kW for power-related registers
+            needs_w_to_kw_conversion = False
+            if register and unit == "W":
+                # Check if it's a power-related register
+                power_categories = ['power', 'energy']
+                power_keywords = ['power', 'active', 'apparent', 'reactive']
+                register_name_lower = register_name.lower()
+                category_lower = (register.category or '').lower()
+                
+                if (category_lower in power_categories or 
+                    any(keyword in register_name_lower for keyword in power_keywords)):
+                    unit = "kW"
+                    needs_w_to_kw_conversion = True
+            
             panel = self.build_panel(
                 panel_id=panel_id,
                 register_name=register_name,
@@ -104,6 +118,7 @@ class GrafanaConfigurationManager:
                 device_name=device.name,
                 x_pos=x_pos,
                 y_pos=y_pos,
+                needs_w_to_kw_conversion=needs_w_to_kw_conversion,
             )
             panels.append(panel)
             panel_id += 1
@@ -121,25 +136,50 @@ class GrafanaConfigurationManager:
             "overwrite": True
         }
 
-    def build_panel(self, panel_id, register_name, register, field_name, unit, device_name, x_pos, y_pos):
+    def build_panel(self, panel_id, register_name, register, field_name, unit, device_name, x_pos, y_pos, needs_w_to_kw_conversion=False):
         """Create Grafana panel config based on register visualization type"""
         visualization_type = (getattr(register, 'visualization_type', None) or 'timeseries').lower()
         panel_type = self.get_panel_type(visualization_type)
         grid_height = 8 if panel_type != "stat" else 4
         
-        base_panel = {
-            "id": panel_id,
-            "title": register_name,
-            "type": panel_type,
-            "gridPos": {
-                "h": grid_height,
-                "w": 12,
-                "x": x_pos,
-                "y": y_pos
-            },
-            "targets": [
-                {
-                    "query": f'''
+        # Build the query with W to kW conversion if needed
+        if needs_w_to_kw_conversion:
+            # Add division by 1000 in the Flux query to convert W to kW
+            query_template = '''
+                        // Union query to automatically select the right measurement based on time range
+                        // Raw data (last 5 days) + 1-min downsampled (days 5-35) + 5-min (days 35-215) + 1-hour (days 215-580)
+                        union(tables: [
+                            // Raw data for last 5 days
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
+                            // 1-minute downsampled for days 5-35
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1m")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
+                            // 5-minute downsampled for days 35-215
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_5m")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
+                            // 1-hour downsampled for days 215-580
+                            from(bucket: "databridge")
+                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1h")
+                              |> filter(fn: (r) => r["_field"] == "{field_name}")
+                              |> filter(fn: (r) => r["device_id"] == "{device_name}")
+                        ])
+                          |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+                          |> map(fn: (r) => ({{ r with _value: r._value / 1000.0 }}))
+                          |> yield(name: "mean")
+                    '''
+        else:
+            query_template = '''
                         // Union query to automatically select the right measurement based on time range
                         // Raw data (last 5 days) + 1-min downsampled (days 5-35) + 5-min (days 35-215) + 1-hour (days 215-580)
                         union(tables: [
@@ -170,7 +210,21 @@ class GrafanaConfigurationManager:
                         ])
                           |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
                           |> yield(name: "mean")
-                    ''',
+                    '''
+        
+        base_panel = {
+            "id": panel_id,
+            "title": register_name,
+            "type": panel_type,
+            "gridPos": {
+                "h": grid_height,
+                "w": 12,
+                "x": x_pos,
+                "y": y_pos
+            },
+            "targets": [
+                {
+                    "query": query_template.format(field_name=field_name, device_name=device_name),
                     "rawQuery": True,
                     "resultFormat": "time_series"
                 }

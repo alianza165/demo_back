@@ -561,13 +561,18 @@ def config_status(request):
         }, status=500)
 
 def realtime_power_data(request):
-    """Get real-time active_power_total for all active devices"""
+    """Get real-time data for all active devices (power for electricity, flow for flowmeters)"""
     try:
         from influxdb_client import InfluxDBClient
         from datetime import datetime, timedelta
         
-        # Get all active devices
+        # Get device type filter from query params (optional)
+        device_type_filter = request.GET.get('device_type')  # 'electricity' or 'flowmeter'
+        
+        # Get all active devices, optionally filtered by type
         active_devices = ModbusDevice.objects.filter(is_active=True)
+        if device_type_filter:
+            active_devices = active_devices.filter(device_type=device_type_filter)
         
         if not active_devices.exists():
             return JsonResponse({
@@ -583,26 +588,92 @@ def realtime_power_data(request):
         )
         query_api = client.query_api()
         
-        # Query for latest active_power_total for each device
+        # Query for latest data for each device
         device_data = []
         for device in active_devices:
             try:
-                # Find the active_power_total register for this device
-                power_register = device.registers.filter(
-                    name__icontains='active_power_total',
-                    is_active=True
-                ).first()
-                
-                if not power_register:
-                    # Try alternative field names
-                    power_register = device.registers.filter(
-                        name__icontains='total_active_power',
+                # For electricity devices, look for power registers
+                # For flowmeters, look for flow registers
+                if device.device_type == 'flowmeter':
+                    # Look for instantaneous flow or total flow
+                    value_register = device.registers.filter(
+                        name__icontains='instantaneous_flow',
                         is_active=True
                     ).first()
+                    
+                    if not value_register:
+                        value_register = device.registers.filter(
+                            name__icontains='flow',
+                            is_active=True
+                        ).first()
+                    
+                    default_unit = 'm³/h'
+                else:
+                    # Electricity analyzer - look for power registers
+                    # Try multiple variations to find the total/three-phase power
+                    value_register = device.registers.filter(
+                        name__icontains='active_power_total',
+                        is_active=True
+                    ).first()
+                    
+                    if not value_register:
+                        # Try "total_active_power"
+                        value_register = device.registers.filter(
+                            name__icontains='total_active_power',
+                            is_active=True
+                        ).first()
+                    
+                    if not value_register:
+                        # Try "Active Three-phase Power" (common in Circutor analyzers)
+                        value_register = device.registers.filter(
+                            name__icontains='active three-phase power',
+                            is_active=True
+                        ).first()
+                    
+                    if not value_register:
+                        # Try "three-phase" or "three_phase" variations
+                        value_register = device.registers.filter(
+                            name__icontains='three-phase',
+                            is_active=True
+                        ).filter(
+                            name__icontains='active'
+                        ).first()
+                    
+                    if not value_register:
+                        # Try "three_phase" with underscore
+                        value_register = device.registers.filter(
+                            name__icontains='three_phase',
+                            is_active=True
+                        ).filter(
+                            name__icontains='active'
+                        ).first()
+                    
+                    if not value_register:
+                        # Fallback: any register with "active" and "power" (but not per-phase)
+                        value_register = device.registers.filter(
+                            name__icontains='active',
+                            is_active=True
+                        ).filter(
+                            name__icontains='power'
+                        ).exclude(
+                            name__icontains='l1'
+                        ).exclude(
+                            name__icontains='l2'
+                        ).exclude(
+                            name__icontains='l3'
+                        ).exclude(
+                            name__icontains='phase_1'
+                        ).exclude(
+                            name__icontains='phase_2'
+                        ).exclude(
+                            name__icontains='phase_3'
+                        ).first()
+                    
+                    default_unit = 'kW'
                 
-                if power_register:
+                if value_register:
                     # Get the field name (use influxdb_field_name if available, otherwise use name)
-                    field_name = power_register.influxdb_field_name or power_register.name
+                    field_name = value_register.influxdb_field_name or value_register.name
                     
                     # Query for the latest value (last 5 minutes, get most recent)
                     query = f'''
@@ -615,53 +686,63 @@ def realtime_power_data(request):
                     '''
                     
                     result = query_api.query(query)
-                    power_value = None
+                    value = None
                     last_update = None
                     
                     for table in result:
                         for record in table.records:
-                            power_value = record.get_value()
+                            value = record.get_value()
                             last_update = record.get_time()
                             break
-                        if power_value is not None:
+                        if value is not None:
                             break
                     
                     # Apply scale factor if needed
-                    if power_value is not None and power_register.scale_factor:
-                        power_value = power_value * power_register.scale_factor
+                    if value is not None and value_register.scale_factor:
+                        value = value * value_register.scale_factor
+                    
+                    # Convert W to kW for electricity devices if unit is W
+                    display_unit = value_register.unit or default_unit
+                    display_value = value
+                    if device.device_type == 'electricity' and display_unit == 'W' and value is not None:
+                        display_value = value / 1000.0  # Convert W to kW
+                        display_unit = 'kW'
                     
                     device_data.append({
                         'id': device.id,
                         'name': device.name,
                         'location': device.location or '',
-                        'power_value': power_value,
-                        'unit': power_register.unit or 'kW',
+                        'device_type': device.device_type or 'electricity',  # Default to electricity if not set
+                        'power_value': display_value,  # Keep field name for compatibility
+                        'unit': display_unit,
                         'last_update': last_update.isoformat() if last_update else None,
-                        'is_online': power_value is not None,
+                        'is_online': value is not None,
                         'parent_device_id': device.parent_device.id if device.parent_device else None,
                         'parent_device_name': device.parent_device.name if device.parent_device else None
                     })
                 else:
-                    # No active_power_total register found
+                    # No relevant register found
                     device_data.append({
                         'id': device.id,
                         'name': device.name,
                         'location': device.location or '',
+                        'device_type': device.device_type or 'electricity',  # Default to electricity if not set
                         'power_value': None,
-                        'unit': 'kW',
+                        'unit': default_unit,
                         'last_update': None,
                         'is_online': False,
                         'parent_device_id': device.parent_device.id if device.parent_device else None,
                         'parent_device_name': device.parent_device.name if device.parent_device else None
                     })
             except Exception as e:
-                logger.error(f"Error fetching power data for device {device.name}: {e}")
+                logger.error(f"Error fetching data for device {device.name}: {e}")
                 device_data.append({
                     'id': device.id,
                     'name': device.name,
                     'location': device.location or '',
+                    'device_type': device.device_type or 'electricity',  # Default to electricity if not set
                     'power_value': None,
-                    'unit': 'kW',
+                    'unit': 'kW' if (device.device_type or 'electricity') == 'electricity' else 'm³/h',
                     'last_update': None,
                     'is_online': False,
                     'error': str(e),

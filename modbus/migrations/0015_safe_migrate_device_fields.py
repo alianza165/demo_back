@@ -37,7 +37,7 @@ def reverse_migration(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('modbus', '0014_remove_modbusdevice_department_and_more'),
+        ('modbus', '0014_2_remove_modbusdevice_department_and_more'),
     ]
 
     operations = [

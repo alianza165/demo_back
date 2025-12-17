@@ -15,6 +15,12 @@ import os
 from dotenv import load_dotenv
 import socket
 
+# Optional Celery import
+try:
+    from celery.schedules import crontab
+except ImportError:
+    crontab = None  # Celery not installed
+
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -79,25 +85,55 @@ INSTALLED_APPS = [
     # Your apps
     'modbus',
     'analytics',
+    'reporting',
 ]
 
 # Add Grafana configuration
 GRAFANA_CONFIG = {
-    'URL': os.getenv('GRAFANA_URL', 'http://localhost:3000'),
+    'URL': os.getenv('GRAFANA_URL', 'http://localhost:3002'),
     'API_KEY': os.getenv('GRAFANA_API_KEY', 'your-api-key-here'),
     'DASHBOARD_PREFIX': 'modbus-',
 }
 
 # Celery configuration
-CELERY_BROKER_URL = 'redis://localhost:6379'
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
 CELERY_BEAT_SCHEDULE = {
+    # Analytics tasks
     'aggregate-hourly-data': {
         'task': 'analytics.tasks.aggregate_hourly_data',
         'schedule': 3600.0,  # Every hour
     },
     'calculate-daily-shifts': {
         'task': 'analytics.tasks.calculate_daily_shifts', 
-        'schedule': 86400.0,  # Every day
+        'schedule': 86400.0,  # Every day at midnight
+    },
+    # Reporting tasks - coordinate with downsampling
+    'aggregate-daily-data': {
+        'task': 'reporting.tasks.aggregate_daily_data',
+        'schedule': 86400.0,  # Daily, runs after downsampling (add delay if needed)
+        'options': {'queue': 'reporting'},
+    },
+    'aggregate-monthly-data': {
+        'task': 'reporting.tasks.aggregate_monthly_data',
+        'schedule': crontab(day_of_month=1, hour=2, minute=0) if crontab else 86400.0,  # 1st of month at 2 AM
+        'options': {'queue': 'reporting'},
+    },
+    'calculate-benchmarks': {
+        'task': 'reporting.tasks.calculate_benchmarks',
+        'schedule': 604800.0,  # Weekly
+        'options': {'queue': 'reporting'},
+    },
+    'update-target-progress': {
+        'task': 'reporting.tasks.update_target_progress',
+        'schedule': 86400.0,  # Daily
+        'options': {'queue': 'reporting'},
     },
 }
 

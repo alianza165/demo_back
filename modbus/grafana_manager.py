@@ -142,75 +142,30 @@ class GrafanaConfigurationManager:
         panel_type = self.get_panel_type(visualization_type)
         grid_height = 8 if panel_type != "stat" else 4
         
-        # Build the query with W to kW conversion if needed
+        # Build InfluxQL query for InfluxDB v1
+        # Escape field name and device name for InfluxQL
+        field_name_escaped = field_name.replace('"', '\\"')
+        device_name_escaped = device_name.replace('"', '\\"')
+        
+        # For InfluxDB v1, we'll query from the main measurement
+        # Grafana will handle time range selection automatically
+        # We use the main measurement and let InfluxDB handle aggregation based on time range
         if needs_w_to_kw_conversion:
-            # Add division by 1000 in the Flux query to convert W to kW
-            query_template = '''
-                        // Union query to automatically select the right measurement based on time range
-                        // Raw data (last 5 days) + 1-min downsampled (days 5-35) + 5-min (days 35-215) + 1-hour (days 215-580)
-                        union(tables: [
-                            // Raw data for last 5 days
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
-                            // 1-minute downsampled for days 5-35
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1m")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
-                            // 5-minute downsampled for days 35-215
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_5m")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
-                            // 1-hour downsampled for days 215-580
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1h")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}")
-                        ])
-                          |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-                          |> map(fn: (r) => ({{ r with _value: r._value / 1000.0 }}))
-                          |> yield(name: "mean")
-                    '''
+            # Convert W to kW by dividing by 1000
+            query_template = 'SELECT mean("{field_name}") / 1000.0 AS "value" FROM "{measurement}" WHERE "device_id" = \'{device_name}\' AND $timeFilter GROUP BY time($__interval) fill(null)'
         else:
-            query_template = '''
-                        // Union query to automatically select the right measurement based on time range
-                        // Raw data (last 5 days) + 1-min downsampled (days 5-35) + 5-min (days 35-215) + 1-hour (days 215-580)
-                        union(tables: [
-                            // Raw data for last 5 days
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
-                            // 1-minute downsampled for days 5-35
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1m")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
-                            // 5-minute downsampled for days 35-215
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_5m")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}"),
-                            // 1-hour downsampled for days 215-580
-                            from(bucket: "databridge")
-                              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-                              |> filter(fn: (r) => r["_measurement"] == "energy_measurements_1h")
-                              |> filter(fn: (r) => r["_field"] == "{field_name}")
-                              |> filter(fn: (r) => r["device_id"] == "{device_name}")
-                        ])
-                          |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-                          |> yield(name: "mean")
-                    '''
+            query_template = 'SELECT mean("{field_name}") AS "value" FROM "{measurement}" WHERE "device_id" = \'{device_name}\' AND $timeFilter GROUP BY time($__interval) fill(null)'
+        
+        # Use the appropriate measurement based on typical data availability
+        # Check if energy_measurements_1m exists (downsampled data is more likely available)
+        # For now, try energy_measurements_1m first, fallback to energy_measurements
+        measurement = "energy_measurements_1m"
+        
+        query = query_template.format(
+            field_name=field_name_escaped,
+            measurement=measurement,
+            device_name=device_name_escaped
+        )
         
         base_panel = {
             "id": panel_id,
@@ -224,9 +179,10 @@ class GrafanaConfigurationManager:
             },
             "targets": [
                 {
-                    "query": query_template.format(field_name=field_name, device_name=device_name),
+                    "query": query,
                     "rawQuery": True,
-                    "resultFormat": "time_series"
+                    "resultFormat": "time_series",
+                    "refId": "A"
                 }
             ],
             "fieldConfig": {

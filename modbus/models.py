@@ -23,16 +23,44 @@ class ModbusDevice(models.Model):
     ]
     
     APPLICATION_CHOICES = [
-        ('machine', 'Machine'),      # Specific equipment/machine
-        ('supply', 'Supply'),        # Energy source (solar, utility, generator)
-        ('department', 'Department'), # Whole department/building
-        ('process', 'Process'),      # Specific manufacturing process
-        ('facility', 'Facility'),    # Entire facility
+        # Supply types (energy sources)
+        ('gen', 'Generator'),         # Generator supply
+        ('wapda', 'WAPDA'),           # WAPDA/Utility supply
+        ('solar', 'Solar'),           # Solar supply
+        # Load types (consumption points)
+        ('dept', 'Department'),       # Department load
+        ('facility', 'Facility'),     # Facility load
+        ('process', 'Process'),       # Process load
+        ('machine', 'Machine'),       # Machine load
+    ]
+    
+    PROCESS_AREA_CHOICES = [
+        ('denim', 'Denim'),
+        ('finishing', 'Finishing'),
+        ('washing', 'Washing'),
+        ('sewing', 'Sewing'),
+        ('general', 'General'),
+    ]
+    
+    FLOOR_CHOICES = [
+        ('GF', 'Ground Floor'),
+        ('FF', 'First Floor'),
+        ('SF', 'Second Floor'),
+        ('WF', 'Washing Floor'),
+        ('none', 'N/A'),
+    ]
+    
+    LOAD_TYPE_CHOICES = [
+        ('LT01', 'Load Type 01'),
+        ('LT02', 'Load Type 02'),
+        ('MAIN', 'Main'),
+        ('none', 'N/A'),
     ]
     
     DEVICE_TYPE_CHOICES = [
         ('electricity', 'Electricity Analyzer'),
         ('flowmeter', 'Flowmeter'),
+        ('temp_gauge', 'Temperature Gauge'),
     ]
     
     # Basic device info
@@ -48,13 +76,13 @@ class ModbusDevice(models.Model):
         max_length=20,
         choices=DEVICE_TYPE_CHOICES,
         default='electricity',
-        help_text="Type of device: electricity analyzer or flowmeter"
+        help_text="Type of device: electricity analyzer, flowmeter, or temperature gauge"
     )
     application_type = models.CharField(
         max_length=20,
         choices=APPLICATION_CHOICES,
         default='machine',
-        help_text="Where this device is installed"
+        help_text="Application type: Supply (gen/wapda/solar) or Load (dept/facility/process/machine)"
     )
     
     # Modbus connection settings
@@ -70,6 +98,26 @@ class ModbusDevice(models.Model):
     is_active = models.BooleanField(default=True)
     location = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
+    
+    # Process and location categorization (for reporting)
+    process_area = models.CharField(
+        max_length=20,
+        choices=PROCESS_AREA_CHOICES,
+        default='general',
+        help_text="Process area: Denim, Finishing, Washing, Sewing"
+    )
+    floor = models.CharField(
+        max_length=10,
+        choices=FLOOR_CHOICES,
+        default='none',
+        help_text="Floor location: GF (Ground Floor), FF (First Floor), SF (Second Floor)"
+    )
+    load_type = models.CharField(
+        max_length=10,
+        choices=LOAD_TYPE_CHOICES,
+        default='none',
+        help_text="Load type: LT01, LT02, or MAIN"
+    )
     
     # Single-line diagram relationships
     parent_device = models.ForeignKey(

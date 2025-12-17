@@ -12,8 +12,8 @@ class ModbusRegisterSerializer(serializers.ModelSerializer):
         model = ModbusRegister
         fields = '__all__'
         extra_kwargs = {
-            'device': {'required': False},
-            'device_model': {'required': False}
+            'device': {'required': False, 'allow_null': True},
+            'device_model': {'required': False, 'allow_null': True}
         }
     
     def validate(self, attrs):
@@ -24,6 +24,12 @@ class ModbusRegisterSerializer(serializers.ModelSerializer):
         """
         # If nested under device create/update, bypass parent checks here
         if self.context.get('is_device_update', False):
+            # Ensure device_model is None when nested (device will be set by parent)
+            # Also ensure device is None as it will be set by parent serializer
+            if 'device_model' not in attrs or attrs.get('device_model') is None:
+                attrs['device_model'] = None
+            if 'device' not in attrs or attrs.get('device') is None:
+                attrs['device'] = None
             return attrs
         # Ensure register has exactly one parent (device_model OR device)
         device_model = attrs.get('device_model')
@@ -102,50 +108,129 @@ class ModbusDeviceCreateSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Ensure nested registers serializer knows it's under a device create/update
-        if 'registers' in self.fields and hasattr(self.fields['registers'], 'child'):
-            self.fields['registers'].child.context.update({
-                'is_device_update': True
-            })
+        if 'registers' in self.fields:
+            # Set context on the nested serializer field
+            if hasattr(self.fields['registers'], 'child'):
+                # Create a new child serializer with updated context
+                child_class = self.fields['registers'].child.__class__
+                child_context = self.fields['registers'].child.context.copy() if hasattr(self.fields['registers'].child, 'context') else {}
+                child_context['is_device_update'] = True
+                self.fields['registers'].child = child_class(context=child_context)
 
     def create(self, validated_data):
         import logging
         logger = logging.getLogger('django.request')
         
-        logger.error("=== CREATE METHOD CALLED ===")
-        logger.error(f"Validated data keys: {validated_data.keys()}")
+        logger.info("=== CREATE METHOD CALLED ===")
+        logger.info(f"Validated data keys: {validated_data.keys()}")
         
         registers_data = validated_data.pop('registers', [])
-        logger.error(f"Number of registers to create: {len(registers_data)}")
+        device_model = validated_data.get('device_model')
+        
+        logger.info(f"Number of registers to create: {len(registers_data)}")
+        logger.info(f"Device model: {device_model}")
         
         # Create the device first
         device = ModbusDevice.objects.create(**validated_data)
         
-        # Create all registers for this device with idempotency by address
+        # If device_model is provided, copy its registers to the device
+        if device_model:
+            model_registers = ModbusRegister.objects.filter(
+                device_model=device_model,
+                is_active=True
+            ).order_by('order', 'address')
+            
+            logger.info(f"Copying {model_registers.count()} registers from device model {device_model.name}")
+            
+            for model_register in model_registers:
+                # Copy register from model to device instance
+                ModbusRegister.objects.create(
+                    device=device,
+                    address=model_register.address,
+                    name=model_register.name,
+                    data_type=model_register.data_type,
+                    scale_factor=model_register.scale_factor,
+                    unit=model_register.unit,
+                    order=model_register.order,
+                    register_count=model_register.register_count,
+                    word_order=model_register.word_order,
+                    category=model_register.category,
+                    visualization_type=model_register.visualization_type,
+                    grafana_metric_name=model_register.grafana_metric_name,
+                    influxdb_field_name=model_register.influxdb_field_name,
+                    energy_measurement_field=model_register.energy_measurement_field,
+                    is_active=model_register.is_active,
+                )
+        
+        # Add any custom registers provided in the request
+        # These will override any registers from the model if they have the same address
         for i, register_data in enumerate(registers_data):
-            logger.error(f"Creating register {i}: {register_data}")
+            logger.info(f"Creating custom register {i}: {register_data}")
             register_data.pop('device', None)
             register_data.pop('device_model', None)
             address = register_data.get('address')
             defaults = {k: v for k, v in register_data.items() if k != 'address'}
-            register, created = ModbusRegister.objects.get_or_create(
+            
+            # Use update_or_create to handle both new and existing registers
+            register, created = ModbusRegister.objects.update_or_create(
                 device=device,
                 address=address,
                 defaults=defaults,
             )
-            if not created:
-                # Update existing register to match provided data
-                for attr, value in defaults.items():
-                    setattr(register, attr, value)
-                register.save()
+            if created:
+                logger.info(f"Created new register at address {address}")
+            else:
+                logger.info(f"Updated existing register at address {address}")
         
         return device
     
     def update(self, instance, validated_data):
+        import logging
+        logger = logging.getLogger('django.request')
+        
+        # Prevent changing device_model after creation
+        if 'device_model' in validated_data:
+            new_device_model = validated_data.get('device_model')
+            if instance.device_model != new_device_model:
+                if instance.device_model is not None:
+                    raise serializers.ValidationError({
+                        'device_model': 'Cannot change device_model after device creation. Device is already associated with a model.'
+                    })
+                # If device didn't have a model before, allow setting it once
+                # But this is discouraged - model should be set at creation
+                logger.warning(f"Device {instance.id} is being assigned a device_model during update. This should be done during creation.")
+        
+        # Prevent changing application_type between supply and load categories
+        # But allow changes within the same category (e.g., gen -> wapda, or dept -> facility)
+        if 'application_type' in validated_data:
+            new_application_type = validated_data.get('application_type')
+            old_application_type = instance.application_type
+            
+            # Define supply and load categories
+            supply_types = ['gen', 'wapda', 'solar']
+            load_types = ['dept', 'facility', 'process', 'machine']
+            
+            old_is_supply = old_application_type in supply_types
+            old_is_load = old_application_type in load_types
+            new_is_supply = new_application_type in supply_types
+            new_is_load = new_application_type in load_types
+            
+            # Prevent changing from supply to load or vice versa
+            if old_is_supply and new_is_load:
+                raise serializers.ValidationError({
+                    'application_type': 'Cannot change application_type from supply category (gen/wapda/solar) to load category (dept/facility/process/machine).'
+                })
+            if old_is_load and new_is_supply:
+                raise serializers.ValidationError({
+                    'application_type': 'Cannot change application_type from load category (dept/facility/process/machine) to supply category (gen/wapda/solar).'
+                })
+        
         registers_data = validated_data.pop('registers', None)
         
-        # Update device fields
+        # Update device fields (excluding device_model if it shouldn't change)
         for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+            if attr != 'device_model' or instance.device_model is None:
+                setattr(instance, attr, value)
         instance.save()
         
         # Handle registers update
@@ -170,23 +255,23 @@ class ModbusDeviceCreateSerializer(serializers.ModelSerializer):
                     ).first()
                 
                 if existing_register:
-                    # Update existing register
+                    # Update existing register (allows changing visualization_type and other fields)
                     for attr, value in register_data.items():
                         setattr(existing_register, attr, value)
                     existing_register.save()
                     updated_register_ids.add(existing_register.id)
-                    print(f"Updated existing register {existing_register.id} with address {register_data.get('address')}")
+                    logger.info(f"Updated existing register {existing_register.id} with address {register_data.get('address')}")
                 else:
                     # Create new register
                     register = ModbusRegister.objects.create(device=instance, **register_data)
                     updated_register_ids.add(register.id)
-                    print(f"Created new register {register.id} with address {register_data.get('address')}")
+                    logger.info(f"Created new register {register.id} with address {register_data.get('address')}")
             
             # Delete registers that weren't included in the update
             registers_to_delete = existing_register_ids - updated_register_ids
             if registers_to_delete:
-                deleted_count = instance.registers.filter(id__in=registers_to_delete).delete()
-                print(f"Deleted {deleted_count} registers")
+                deleted_count = instance.registers.filter(id__in=registers_to_delete).delete()[0]
+                logger.info(f"Deleted {deleted_count} registers")
         
         return instance
         

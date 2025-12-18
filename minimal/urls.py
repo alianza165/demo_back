@@ -28,7 +28,6 @@ urlpatterns = [
     # API endpoints
     path('api/', include('modbus.urls')),
     path('api/', include('analytics.urls')),  # Add analytics URLs
-    path('api/reporting/', include('reporting.urls')),  # Add reporting URLs
     
     # API documentation
     path('swagger<format>/', schema_view.without_ui(cache_timeout=0), name='schema-json'),

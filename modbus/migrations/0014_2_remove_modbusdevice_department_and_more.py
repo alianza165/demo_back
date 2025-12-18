@@ -39,3 +39,4 @@ class Migration(migrations.Migration):
             field=models.CharField(choices=[('denim', 'Denim'), ('finishing', 'Finishing'), ('washing', 'Washing'), ('sewing', 'Sewing'), ('general', 'General')], default='general', help_text='Process area: Denim, Finishing, Washing, Sewing', max_length=20),
         ),
     ]
+

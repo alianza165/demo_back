@@ -83,3 +83,4 @@ class Migration(migrations.Migration):
             migrate_device_fields_reverse,
         ),
     ]
+

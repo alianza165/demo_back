@@ -85,7 +85,6 @@ INSTALLED_APPS = [
     # Your apps
     'modbus',
     'analytics',
-    'reporting',
 ]
 
 # Add Grafana configuration
@@ -113,27 +112,6 @@ CELERY_BEAT_SCHEDULE = {
     'calculate-daily-shifts': {
         'task': 'analytics.tasks.calculate_daily_shifts', 
         'schedule': 86400.0,  # Every day at midnight
-    },
-    # Reporting tasks - coordinate with downsampling
-    'aggregate-daily-data': {
-        'task': 'reporting.tasks.aggregate_daily_data',
-        'schedule': 86400.0,  # Daily, runs after downsampling (add delay if needed)
-        'options': {'queue': 'reporting'},
-    },
-    'aggregate-monthly-data': {
-        'task': 'reporting.tasks.aggregate_monthly_data',
-        'schedule': crontab(day_of_month=1, hour=2, minute=0) if crontab else 86400.0,  # 1st of month at 2 AM
-        'options': {'queue': 'reporting'},
-    },
-    'calculate-benchmarks': {
-        'task': 'reporting.tasks.calculate_benchmarks',
-        'schedule': 604800.0,  # Weekly
-        'options': {'queue': 'reporting'},
-    },
-    'update-target-progress': {
-        'task': 'reporting.tasks.update_target_progress',
-        'schedule': 86400.0,  # Daily
-        'options': {'queue': 'reporting'},
     },
 }
 
@@ -213,8 +191,11 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # CORS settings (adjust for your frontend)
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # Next.js default port
     "http://localhost:3001",  # Next.js dev server
+    "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
+    "http://192.168.1.20:3000",
     "http://192.168.1.20:3001",
 ]
 

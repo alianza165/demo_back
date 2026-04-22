@@ -31,7 +31,22 @@ urlpatterns = [
         views.EnergyAnalyticsReportView.as_view(),
         name='energy-analytics-report',
     ),
-    
+    path(
+        'analytics/live-insights/',
+        views.LiveInsightsView.as_view(),
+        name='live-insights',
+    ),
+    path(
+        'analytics/forecast/',
+        views.ForecastView.as_view(),
+        name='forecast',
+    ),
+    path(
+        'analytics/forecast/compare/',
+        views.ForecastCompareView.as_view(),
+        name='forecast-compare',
+    ),
+
     # Energy analytics endpoints (custom actions on ViewSet)
     # Note: These use hyphens in URL but underscore in method names
     # The @action decorators register them automatically, but we add explicit paths

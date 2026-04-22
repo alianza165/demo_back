@@ -91,6 +91,20 @@ class DeviceComparison(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
 
+class ForecastRecord(models.Model):
+    """Stores the daily forecast snapshot so actuals can be compared later."""
+    forecast_date = models.DateField(unique=True)   # the day being forecast
+    ref_date       = models.DateField()              # reference day used
+    saved_at       = models.DateTimeField(auto_now=True)
+    forecast_json  = models.JSONField()              # full ForecastView response payload
+
+    class Meta:
+        ordering = ['-forecast_date']
+
+    def __str__(self):
+        return f"Forecast for {self.forecast_date} (saved {self.saved_at:%Y-%m-%d %H:%M})"
+
+
 class AnomalyDetection(models.Model):
     """Detected anomalies in energy consumption"""
     device = models.ForeignKey(
